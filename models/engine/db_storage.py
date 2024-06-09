@@ -1,97 +1,138 @@
 #!/usr/bin/python3
-"""This is the db storage class for AirBnB"""
-from models.base_model import BaseModel, Base
-from models.user import User
-from models.state import State
-from models.city import City
 from models.amenity import Amenity
+from models.base_model import Base
+from models.city import City
 from models.place import Place
 from models.review import Review
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, scoped_session
-from os import environ as env
+from models.state import State
+from models.user import User
+from os import getenv
+from sqlalchemy import (create_engine, func)
+from sqlalchemy.orm import (sessionmaker, scoped_session)
+"""
+This is the db_storage module.
+This module deals with storing and retrieving data from a mysql database.
+This module contains one class DBStorage.
+"""
 
 
 class DBStorage:
-    """This class serializes instances for database storage
-    Attributes:
-        __engine: engin to connect db
-        __session: session to interact with db
-        __clsdict: dictionary of all classes
+    """
+    class DBStorage
+    Save and retrieve data from a MySQL database using sqlAlchemy ORM
+
+    **class attributes**
+       __engine: private, sqlAlchemy engine
+       __session: private, MySQL session
+
+    instance attributes:
+       __models_available: private, dictionary of <string> <class>
     """
     __engine = None
     __session = None
-    __clsdict = {
-        "User": User,
-        "State": State,
-        "City": City,
-        "Amenity": Amenity,
-        "Place": Place,
-        "Review": Review
-    }
 
     def __init__(self):
-        """setup __engine
         """
-        self.__engine = create_engine(
-            "mysql+mysqldb://{}:{}@{}:3306/{}".format(
-                env['HBNB_MYSQL_USER'],
-                env['HBNB_MYSQL_PWD'],
-                env['HBNB_MYSQL_HOST'],
-                env['HBNB_MYSQL_DB']
-            ), pool_pre_ping=True
-        )
-        if env.get('HBNB_ENV') == 'test':
+        initializes engine
+        """
+        self.__engine = create_engine('mysql+mysqldb://{}:{}@{}/{}'.format(
+            getenv('HBNB_MYSQL_USER'),
+            getenv('HBNB_MYSQL_PWD'),
+            getenv('HBNB_MYSQL_HOST'),
+            getenv('HBNB_MYSQL_DB')))
+        # adding, echo=True) shows SQL statements
+        self.__models_available = {"User": User,
+                                   "Amenity": Amenity, "City": City,
+                                   "Place": Place, "Review": Review,
+                                   "State": State}
+        if getenv('HBNB_MYSQL_ENV', 'not') == 'test':
             Base.metadata.drop_all(self.__engine)
 
     def all(self, cls=None):
-        """query for objects depend on the class
-        Arguments:
-            cls: class to query
         """
-        d = {}
-        cls = cls if not isinstance(cls, str) else self.__clsdict.get(cls)
+        returns a dictionary of all the class objects
+        """
+        orm_objects = {}
         if cls:
-            for obj in self.__session.query(cls):
-                d["{}.{}".format(
-                    cls.__name__, obj.id
-                    )] = obj
-            return (d)
-        for k, cls in self.__clsdict.items():
-            for obj in self.__session.query(cls):
-                d["{}.{}".format(cls.__name__, obj.id)] = obj
-        return (d)
+            if cls in self.__models_available:
+                for k in self.__session.query(
+                        self.__models_available.get(cls)):
+                    orm_objects[k.__dict__['id']] = k
+        else:
+            for i in self.__models_available.values():
+                j = self.__session.query(i).all()
+                if j:
+                    for k in j:
+                        orm_objects[k.__dict__['id']] = k
+        return orm_objects
 
     def new(self, obj):
-        """add an object to current db session
-        Arguments:
-            obj: object to add
         """
-        if obj:
-            self.__session.add(obj)
+        adds a new obj to the session
+        """
+        self.__session.add(obj)
 
     def save(self):
-        """commit all changes of current db session
+        """
+        saves the objects fom the current session
         """
         self.__session.commit()
 
     def delete(self, obj=None):
-        """delete obj from current db session
-        Arguments:
-            obj: object to delete
         """
-        if obj:
+        deletes an object from the current session
+        """
+        if obj is not None:
             self.__session.delete(obj)
+            self.__session.commit()
 
     def reload(self):
-        """create all tables in the database
+        """
+        WARNING!!!! I'm not sure if Base.metadata.create_all needs to
+        be in the init method
         """
         Base.metadata.create_all(self.__engine)
-        factory = sessionmaker(bind=self.__engine, expire_on_commit=True)
-        self.__session = scoped_session(factory)()
+        self.__session = scoped_session(sessionmaker(bind=self.__engine,
+                                                     expire_on_commit=False))
 
     def close(self):
-        """remove current session and roll back all unsaved transactions
         """
-        if self.__session:
-            self.__session.close()
+        close a session
+        """
+        self.__session.remove()
+
+    def get(self, cls, id_):
+        """
+        Retrieve one object
+
+        Arguments:
+            cls: string representing a class name
+            id_: string representing the object id, primary key
+
+        Return:
+           object of cls and id passed in argument or None
+        """
+        if (cls not in self.__models_available) or (id_ is None):
+            return None
+        return self.__session.query(
+                self.__models_available[cls]).get(id_)
+
+    def count(self, cls=None):
+        """
+        Number of objects in a certain class
+
+        Arguments:
+            cls: optional, string representing a class name (default None)
+
+        Return:
+            number of objects in that class or in total
+            -1 if the argument is not valid
+        """
+        if cls is None:
+            total = 0
+            for v in self.__models_available.values():
+                total += self.__session.query(v).count()
+            return total
+        if cls in self.__models_available.keys():
+            return self.__session.query(self.__models_available[cls]).count()
+        return -1
